@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
 import { BookingError, createBooking } from "@/lib/bookings";
+import { logAudit } from "@/lib/audit";
 
 export const runtime = "nodejs";
 
@@ -69,6 +70,18 @@ export async function POST(req: NextRequest) {
       scheduledAt: slot.startTime,
       serviceIds: data.serviceIds,
       notes: data.notes,
+    });
+    await logAudit({
+      actorId: user.id,
+      action: "BOOKING_CREATED",
+      entity: "Booking",
+      entityId: booking.id,
+      metadata: {
+        code: booking.code,
+        branchId: booking.branchId,
+        scheduledAt: booking.scheduledAt.toISOString(),
+        serviceIds: data.serviceIds,
+      },
     });
     return NextResponse.json({ booking }, { status: 201 });
   } catch (err) {
