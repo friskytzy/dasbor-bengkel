@@ -73,6 +73,7 @@ export function AdminBookingActions({
         <Dialog
           open={open}
           onOpenChange={(v) => {
+            if (!v && pending) return;
             setOpen(v);
             if (!v) setError(null);
           }}
