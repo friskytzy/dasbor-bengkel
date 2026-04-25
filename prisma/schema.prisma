@@ -1,0 +1,377 @@
+// Dasbor Bengkel — Prisma schema
+// Database: PostgreSQL (Railway)
+// Convention: tabel utama (Branches, Services, Transactions, TransactionItems,
+// LoyaltyPoints) sesuai spesifikasi. Tabel tambahan (Users, Motorcycles,
+// Bookings, MechanicSlots, ServiceReminders, AuditLogs) menopang flow loyalty,
+// booking 45 menit, dan reminder Fonnte.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Role pengguna aplikasi.
+enum UserRole {
+  CUSTOMER
+  MECHANIC
+  ADMIN
+  SUPER_ADMIN
+}
+
+/// Status booking dari pesan masuk hingga selesai.
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  IN_PROGRESS
+  DONE
+  CANCELLED
+  NO_SHOW
+}
+
+/// Status transaksi pembayaran.
+enum TransactionStatus {
+  DRAFT
+  PAID
+  REFUNDED
+  VOID
+}
+
+/// Kategori layanan bengkel.
+enum ServiceType {
+  LIGHT_SERVICE     // Servis ringan
+  HEAVY_SERVICE     // Servis berat / overhaul
+  OIL_CHANGE        // Ganti oli
+  TUNE_UP           // Tune up
+  TIRE              // Ban / velg
+  ELECTRICAL        // Kelistrikan
+  BODY              // Body / cat
+  OTHER
+}
+
+/// Tipe entry pada ledger loyalty (poin keluar/masuk).
+enum LoyaltyEntryType {
+  EARN              // Dari transaksi (10 poin per kelipatan Rp 10.000)
+  REDEEM            // Penukaran (>=100 poin = diskon Rp 10.000)
+  ADJUST            // Manual admin
+  EXPIRE            // Otomatis 12 bulan
+}
+
+/// Status reminder WA via Fonnte.
+enum ReminderStatus {
+  SCHEDULED
+  SENT
+  FAILED
+  CANCELLED
+}
+
+// ---------------------------------------------------------------------------
+// USERS / AUTH (Clerk-backed)
+// ---------------------------------------------------------------------------
+model User {
+  id          String   @id @default(cuid())
+  clerkId     String   @unique
+  email       String?  @unique
+  phone       String?  @unique
+  fullName    String
+  role        UserRole @default(CUSTOMER)
+  branchId    String?
+  branch      Branch?  @relation(fields: [branchId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  motorcycles  Motorcycle[]
+  bookings     Booking[]
+  transactions Transaction[]
+  loyalty      LoyaltyPoint?
+  loyaltyLogs  LoyaltyLedger[]
+  reminders    ServiceReminder[]
+  auditLogs    AuditLog[]
+
+  @@index([role])
+  @@index([branchId])
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// BRANCHES
+// ---------------------------------------------------------------------------
+model Branch {
+  id                String  @id @default(cuid())
+  name              String
+  address           String
+  city              String  @default("Batam")
+  phone             String?
+  /// Kapasitas mekanik aktif (jumlah slot paralel per interval).
+  mechanic_capacity Int     @default(2)
+  /// Hard-cap booking per hari per cabang (default 11 motor — sesuai spesifikasi).
+  daily_capacity    Int     @default(11)
+  isActive          Boolean @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  users         User[]
+  bookings      Booking[]
+  transactions  Transaction[]
+  mechanicSlots MechanicSlot[]
+
+  @@index([city])
+  @@map("branches")
+}
+
+// ---------------------------------------------------------------------------
+// MOTORCYCLES (kendaraan pelanggan)
+// ---------------------------------------------------------------------------
+model Motorcycle {
+  id          String   @id @default(cuid())
+  ownerId     String
+  owner       User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  plateNumber String   @unique
+  brand       String
+  model       String
+  year        Int?
+  color       String?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  bookings Booking[]
+
+  @@index([ownerId])
+  @@map("motorcycles")
+}
+
+// ---------------------------------------------------------------------------
+// SERVICES (master data)
+// ---------------------------------------------------------------------------
+model Service {
+  id              String      @id @default(cuid())
+  name            String
+  type            ServiceType
+  /// Harga dalam Rupiah (integer — IDR tidak punya satuan desimal).
+  price           Int
+  /// Estimasi durasi (menit). Dipakai untuk auto-block beberapa slot 45-mnt.
+  estimatedMinutes Int        @default(45)
+  description     String?
+  isActive        Boolean     @default(true)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  bookingServices  BookingService[]
+  transactionItems TransactionItem[]
+
+  @@index([type])
+  @@map("services")
+}
+
+// ---------------------------------------------------------------------------
+// MECHANIC SLOTS (45-mnt, 09:00–18:00, lunch 12:00–13:00)
+// ---------------------------------------------------------------------------
+model MechanicSlot {
+  id        String   @id @default(cuid())
+  branchId  String
+  branch    Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  /// Tanggal slot (00:00 lokal, dipakai sebagai key harian).
+  slotDate  DateTime @db.Date
+  startTime DateTime
+  endTime   DateTime
+  /// Jumlah mekanik tersedia di interval ini (clone dari branch.mechanic_capacity).
+  capacity  Int
+  /// Jumlah booking sudah masuk pada slot ini.
+  booked    Int      @default(0)
+  isLocked  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  bookings Booking[]
+
+  @@unique([branchId, slotDate, startTime])
+  @@index([branchId, slotDate])
+  @@map("mechanic_slots")
+}
+
+// ---------------------------------------------------------------------------
+// BOOKINGS
+// ---------------------------------------------------------------------------
+model Booking {
+  id            String        @id @default(cuid())
+  code          String        @unique // mis. BK-20260425-0007
+  customerId    String
+  customer      User          @relation(fields: [customerId], references: [id])
+  motorcycleId  String
+  motorcycle    Motorcycle    @relation(fields: [motorcycleId], references: [id])
+  branchId      String
+  branch        Branch        @relation(fields: [branchId], references: [id])
+  slotId        String
+  slot          MechanicSlot  @relation(fields: [slotId], references: [id])
+  scheduledAt   DateTime
+  status        BookingStatus @default(PENDING)
+  notes         String?
+  /// Total estimasi (Rupiah) berdasarkan service yang dipilih saat booking.
+  estimatedTotal Int          @default(0)
+  doneAt        DateTime?
+  cancelledAt   DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  services    BookingService[]
+  transaction Transaction?
+  reminder    ServiceReminder?
+
+  @@index([customerId])
+  @@index([branchId, scheduledAt])
+  @@index([status])
+  @@map("bookings")
+}
+
+model BookingService {
+  id        String  @id @default(cuid())
+  bookingId String
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  serviceId String
+  service   Service @relation(fields: [serviceId], references: [id])
+  /// Snapshot harga saat booking (Rupiah).
+  priceSnapshot Int
+  quantity  Int     @default(1)
+
+  @@unique([bookingId, serviceId])
+  @@map("booking_services")
+}
+
+// ---------------------------------------------------------------------------
+// TRANSACTIONS (1 booking = 1 transaction; juga jadi sumber poin loyalty)
+// ---------------------------------------------------------------------------
+model Transaction {
+  id              String            @id @default(cuid())
+  invoiceNumber   String            @unique // INV-20260425-0007
+  bookingId       String?           @unique
+  booking         Booking?          @relation(fields: [bookingId], references: [id])
+  customerId      String
+  customer        User              @relation(fields: [customerId], references: [id])
+  branchId        String
+  branch          Branch            @relation(fields: [branchId], references: [id])
+  status          TransactionStatus @default(DRAFT)
+  /// Subtotal (Rupiah, integer).
+  subtotal        Int
+  discountAmount  Int               @default(0)
+  /// Poin loyalty yang ditukar pada transaksi ini (kelipatan 100).
+  redeemedPoints  Int               @default(0)
+  total           Int
+  /// Poin yang diterima pelanggan pada transaksi ini (10 poin / Rp 10.000).
+  earnedPoints    Int               @default(0)
+  paymentMethod   String?
+  paidAt          DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  items        TransactionItem[]
+  loyaltyLogs  LoyaltyLedger[]
+
+  @@index([customerId])
+  @@index([branchId, createdAt])
+  @@index([status])
+  @@map("transactions")
+}
+
+model TransactionItem {
+  id            String      @id @default(cuid())
+  transactionId String
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  serviceId     String?
+  service       Service?    @relation(fields: [serviceId], references: [id])
+  /// Free-form description (mis. "Sparepart kampas rem belakang").
+  description   String
+  /// Harga satuan saat transaksi (Rupiah).
+  unitPrice     Int
+  quantity      Int         @default(1)
+  /// Subtotal item (unitPrice * quantity).
+  lineTotal     Int
+
+  @@index([transactionId])
+  @@map("transaction_items")
+}
+
+// ---------------------------------------------------------------------------
+// LOYALTY
+// ---------------------------------------------------------------------------
+/// Saldo loyalty pelanggan (1 baris per user).
+model LoyaltyPoint {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Saldo poin aktif (sudah memperhitungkan EARN/REDEEM/EXPIRE).
+  balance      Int      @default(0)
+  /// Total poin yang pernah didapat (untuk tier/leaderboard).
+  lifetimeEarned Int    @default(0)
+  /// Total poin yang pernah ditukar.
+  lifetimeRedeemed Int  @default(0)
+  updatedAt    DateTime @updatedAt
+
+  @@map("loyalty_points")
+}
+
+/// Ledger seluruh perubahan poin. Earn punya `expiresAt` = 12 bulan dari createdAt.
+model LoyaltyLedger {
+  id            String           @id @default(cuid())
+  userId        String
+  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactionId String?
+  transaction   Transaction?     @relation(fields: [transactionId], references: [id])
+  type          LoyaltyEntryType
+  /// Positif untuk EARN/ADJUST(+), negatif untuk REDEEM/EXPIRE.
+  points        Int
+  /// Saldo poin earn yang masih tersisa (untuk FIFO expiry).
+  remaining     Int              @default(0)
+  expiresAt     DateTime?
+  note          String?
+  createdAt     DateTime         @default(now())
+
+  @@index([userId, type])
+  @@index([expiresAt])
+  @@map("loyalty_ledger")
+}
+
+// ---------------------------------------------------------------------------
+// SERVICE REMINDERS (Fonnte WhatsApp; H+50 setelah transaksi DONE)
+// ---------------------------------------------------------------------------
+model ServiceReminder {
+  id              String         @id @default(cuid())
+  userId          String
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bookingId       String?        @unique
+  booking         Booking?       @relation(fields: [bookingId], references: [id])
+  scheduledFor    DateTime
+  status          ReminderStatus @default(SCHEDULED)
+  channel         String         @default("WHATSAPP")
+  message         String
+  sentAt          DateTime?
+  fonnteMessageId String?
+  errorMessage    String?
+  attempts        Int            @default(0)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([status, scheduledFor])
+  @@index([userId])
+  @@map("service_reminders")
+}
+
+// ---------------------------------------------------------------------------
+// AUDIT LOG
+// ---------------------------------------------------------------------------
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  actor     User?    @relation(fields: [actorId], references: [id])
+  action    String
+  entity    String
+  entityId  String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
