@@ -72,6 +72,7 @@ function randomPlate(i: number): string {
 async function main() {
   console.log("Reset existing seed data…");
   await prisma.$transaction([
+    prisma.auditLog.deleteMany(),
     prisma.transactionItem.deleteMany(),
     prisma.serviceReminder.deleteMany(),
     prisma.transaction.deleteMany(),
