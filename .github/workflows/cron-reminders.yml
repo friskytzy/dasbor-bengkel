@@ -1,0 +1,25 @@
+name: Cron - Service Reminders
+
+on:
+  schedule:
+    # Setiap jam 09:05 WIB (= 02:05 UTC). Pesan dijalankan oleh API endpoint
+    # /api/cron/reminders di production. Workflow ini cuma trigger remote.
+    - cron: "5 2 * * *"
+  workflow_dispatch:
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Hit cron endpoint
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "Skipping: APP_URL or CRON_SECRET secret not configured."
+            exit 0
+          fi
+          curl -fsSL -X POST \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$APP_URL/api/cron/reminders" | tee /tmp/cron.log
