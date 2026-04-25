@@ -93,11 +93,11 @@ export default async function FinalizeBookingPage({
             </div>
           </CardContent>
         </Card>
-      ) : booking.status === "CANCELLED" ? (
+      ) : booking.status === "CANCELLED" || booking.status === "NO_SHOW" ? (
         <Card>
           <CardContent className="flex flex-col gap-3 p-6">
             <p className="text-sm text-[color:var(--color-danger)]">
-              Booking ini sudah dibatalkan dan tidak bisa diselesaikan.
+              Booking ini sudah {booking.status === "NO_SHOW" ? "dicatat sebagai NO_SHOW" : "dibatalkan"} dan tidak bisa diselesaikan.
             </p>
             <div>
               <Button asChild size="sm" variant="soft">

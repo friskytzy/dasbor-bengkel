@@ -25,8 +25,8 @@ export function AdminBookingActions({
   }
 
   async function cancel() {
-    const reason = window.prompt("Alasan pembatalan? (opsional)") ?? undefined;
-    if (reason === null) return; // user cancelled the prompt
+    const reason = window.prompt("Alasan pembatalan? (opsional)");
+    if (reason === null) return; // user dismissed the prompt
     if (!window.confirm("Yakin ingin membatalkan booking ini?")) return;
     setError(null);
     startTransition(async () => {
@@ -34,7 +34,7 @@ export function AdminBookingActions({
         const res = await fetch(`/api/bookings/${bookingId}/cancel`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ reason }),
+          body: JSON.stringify(reason && reason.trim() ? { reason: reason.trim() } : {}),
         });
         if (!res.ok) {
           const j = (await res.json().catch(() => ({}))) as { message?: string };
