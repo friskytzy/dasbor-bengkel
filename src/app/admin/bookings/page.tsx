@@ -152,7 +152,11 @@ export default async function AdminBookings({
                         <Badge tone={statusTone(b.status)}>{b.status}</Badge>
                       </td>
                       <td className="px-4 py-3">
-                        <AdminBookingActions bookingId={b.id} status={b.status} />
+                        <AdminBookingActions
+                          bookingId={b.id}
+                          bookingCode={b.code}
+                          status={b.status}
+                        />
                       </td>
                     </tr>
                   ))}
