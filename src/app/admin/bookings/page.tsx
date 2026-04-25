@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { AdminBookingActions } from "@/components/admin-booking-actions";
 import { prisma } from "@/lib/prisma";
 import { SLOT_RULES } from "@/lib/slots";
 import { formatDateID, formatIDR, formatTimeID } from "@/lib/utils";
@@ -117,6 +118,7 @@ export default async function AdminBookings({
                     <th className="px-4 py-3">Layanan</th>
                     <th className="px-4 py-3">Estimasi</th>
                     <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[color:var(--color-border)]">
@@ -148,6 +150,9 @@ export default async function AdminBookings({
                       <td className="px-4 py-3">{formatIDR(b.estimatedTotal)}</td>
                       <td className="px-4 py-3">
                         <Badge tone={statusTone(b.status)}>{b.status}</Badge>
+                      </td>
+                      <td className="px-4 py-3">
+                        <AdminBookingActions bookingId={b.id} status={b.status} />
                       </td>
                     </tr>
                   ))}
