@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAdmin } from "@/lib/auth";
 import { finalizeTransaction } from "@/lib/transactions";
+import { logAudit } from "@/lib/audit";
 
 export const runtime = "nodejs";
 
@@ -21,8 +22,9 @@ const finalizeSchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
+  let admin;
   try {
-    await requireAdmin();
+    admin = await requireAdmin();
   } catch {
     return NextResponse.json({ message: "Forbidden" }, { status: 403 });
   }
@@ -36,6 +38,20 @@ export async function POST(req: NextRequest) {
   }
   try {
     const transaction = await finalizeTransaction(parsed.data);
+    await logAudit({
+      actorId: admin.id,
+      action: "TRANSACTION_FINALIZED",
+      entity: "Transaction",
+      entityId: transaction.id,
+      metadata: {
+        invoiceNumber: transaction.invoiceNumber,
+        bookingId: transaction.bookingId,
+        total: transaction.total,
+        redeemedPoints: transaction.redeemedPoints,
+        earnedPoints: transaction.earnedPoints,
+        paymentMethod: transaction.paymentMethod,
+      },
+    });
     return NextResponse.json({ transaction }, { status: 201 });
   } catch (err) {
     return NextResponse.json({ message: (err as Error).message }, { status: 400 });

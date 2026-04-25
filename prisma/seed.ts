@@ -244,6 +244,32 @@ async function main() {
       data: { booked: { increment: 1 } },
     });
 
+    await prisma.auditLog.create({
+      data: {
+        actorId: customer.id,
+        action: "BOOKING_CREATED",
+        entity: "Booking",
+        entityId: booking.id,
+        metadata: {
+          code: booking.code,
+          branchId: branch.id,
+          scheduledAt: booking.scheduledAt.toISOString(),
+          serviceIds: chosen.map((s) => s.id),
+        },
+      },
+    });
+    if (status === BookingStatus.CANCELLED) {
+      await prisma.auditLog.create({
+        data: {
+          actorId: customer.id,
+          action: "BOOKING_CANCELLED",
+          entity: "Booking",
+          entityId: booking.id,
+          metadata: { code: booking.code, reason: "Pelanggan reschedule via WA" },
+        },
+      });
+    }
+
     // Buat transaksi + loyalty entry untuk booking DONE
     if (status === BookingStatus.DONE) {
       const subtotal = estimatedTotal;
@@ -310,6 +336,23 @@ async function main() {
           scheduledFor: remindAt,
           status: remindAt < new Date() ? "SCHEDULED" : "SCHEDULED",
           message: `Reminder servis 50 hari setelah ${tx.invoiceNumber}`,
+        },
+      });
+
+      await prisma.auditLog.create({
+        data: {
+          actorId: admin.id,
+          action: "TRANSACTION_FINALIZED",
+          entity: "Transaction",
+          entityId: tx.id,
+          metadata: {
+            invoiceNumber: tx.invoiceNumber,
+            bookingId: booking.id,
+            total: tx.total,
+            redeemedPoints: tx.redeemedPoints,
+            earnedPoints: tx.earnedPoints,
+            paymentMethod: tx.paymentMethod,
+          },
         },
       });
     }

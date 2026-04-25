@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { BookingError, cancelBooking } from "@/lib/bookings";
+import { logAudit } from "@/lib/audit";
 
 export const runtime = "nodejs";
 
@@ -25,6 +26,17 @@ export async function POST(
 
   try {
     const updated = await cancelBooking(id, body?.reason);
+    await logAudit({
+      actorId: user.id,
+      action: "BOOKING_CANCELLED",
+      entity: "Booking",
+      entityId: updated.id,
+      metadata: {
+        code: updated.code,
+        reason: typeof body?.reason === "string" ? body.reason : null,
+        byRole: user.role,
+      },
+    });
     return NextResponse.json({ booking: updated });
   } catch (err) {
     if (err instanceof BookingError) {

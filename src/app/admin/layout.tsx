@@ -53,6 +53,12 @@ export default async function AdminLayout({
           >
             Reminder
           </Link>
+          <Link
+            href="/admin/audit"
+            className="flex-1 rounded-lg px-3 py-2 text-center font-medium hover:bg-[color:var(--color-muted)]"
+          >
+            Audit
+          </Link>
         </nav>
         {children}
       </div>
